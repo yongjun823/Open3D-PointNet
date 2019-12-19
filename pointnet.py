@@ -134,6 +134,29 @@ class PointNetDenseCls(nn.Module):
         x = x.view(batchsize, self.num_points, self.k)
         return x, trans
 
+class PointNetAuto(nn.Module):
+    def __init__(self, num_points = 2500, k = 2):
+        super(PointNetAuto, self).__init__()
+        self.num_points = num_points
+        self.k = k
+        self.feat = PointNetfeat(num_points, global_feat=False)
+        self.conv1 = torch.nn.Conv1d(1088, 512, 1)
+        self.conv2 = torch.nn.Conv1d(512, 256, 1)
+        self.conv3 = torch.nn.Conv1d(256, 128, 1)
+        self.conv4 = torch.nn.Conv1d(128, self.k, 1)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.bn3 = nn.BatchNorm1d(128)
+
+    def forward(self, x):
+        batchsize = x.size()[0]
+        x, trans = self.feat(x)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.conv4(x)
+        
+        return x, trans
 
 if __name__ == '__main__':
     sim_data = Variable(torch.rand(32,3,2500))
