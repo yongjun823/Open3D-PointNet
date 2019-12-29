@@ -1,4 +1,5 @@
 from __future__ import print_function
+import open3d
 import torch.utils.data as data
 from PIL import Image
 import os
@@ -13,7 +14,8 @@ import sys
 import torchvision.transforms as transforms
 import argparse
 import json
-import open3d
+from provider import jitter_point_cloud, select_random_point
+from provider import loadTrainModel40, loadTestModel40
 
 
 class PartDataset(data.Dataset):
@@ -92,7 +94,34 @@ class PartDataset(data.Dataset):
     def __len__(self):
         return len(self.datapath)
 
+class ModelNetDataset(data.Dataset):
+    def __init__(self,
+                 root,
+                 split='train',
+                 jitter=False,
+                 sample=False):
+        self.root = root
+        self.split = split
+        
+        if split == 'train':
+            self.points = loadTrainModel40(root)
+        else:
+            self.points = loadTestModel40(root)
+            
+        if jitter:
+            self.points = jitter_point_cloud(self.points)
+        
+        if sample:
+            self.points = select_random_point(self.points)
+        
+        print('point load info: ', self.points.shape)
 
+    def __getitem__(self, index):
+        return self.points[index]
+
+    def __len__(self):
+        return len(self.points)
+    
 if __name__ == '__main__':
     print('test')
     d = PartDataset(root = 'shapenetcore_partanno_segmentation_benchmark_v0', class_choice = ['Chair'])
@@ -104,3 +133,7 @@ if __name__ == '__main__':
     print(len(d))
     ps, cls = d[0]
     print(ps.size(), ps.type(), cls.size(),cls.type())
+    
+    d = ModelNetDataset(root='./data')
+    print(len(d))
+    print(d[0])
