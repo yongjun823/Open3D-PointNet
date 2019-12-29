@@ -1,6 +1,7 @@
 from __future__ import print_function
-from datasets import PartDataset
+from datasets import PartDataset, ModelNetDataset
 from pointnet import PointNetAuto
+from tqdm import tqdm
 import argparse
 import os
 import random
@@ -24,6 +25,8 @@ parser.add_argument('--workers', type=int, help='number of data loading workers'
 parser.add_argument('--nepoch', type=int, default=25, help='number of epochs to train for')
 parser.add_argument('--outf', type=str, default='auto',  help='output folder')
 parser.add_argument('--model', type=str, default = '',  help='model path')
+parser.add_argument('--jitter', type=bool, default=False)
+parser.add_argument('--sample', type=bool, default=False)
 
 
 opt = parser.parse_args()
@@ -34,17 +37,16 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
-dataset = PartDataset(root = 'shapenetcore_partanno_segmentation_benchmark_v0', classification = False)
+dataset = ModelNetDataset('./data', split='train', jitter=opt.jitter, sample=opt.sample)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                           shuffle=True, num_workers=int(opt.workers))
 
-test_dataset = PartDataset(root = 'shapenetcore_partanno_segmentation_benchmark_v0', classification = False, train = False)
+test_dataset = ModelNetDataset('./data', split='test', jitter=opt.jitter, sample=opt.sample)
 testdataloader = torch.utils.data.DataLoader(test_dataset, batch_size=opt.batchSize,
                                           shuffle=False, num_workers=int(opt.workers))
 
 print(len(dataset), len(test_dataset))
-num_classes = dataset.num_seg_classes
-print('classes', num_classes)
+
 try:
     os.makedirs(opt.outf)
 except OSError:
@@ -52,8 +54,8 @@ except OSError:
 
 blue = lambda x:'\033[94m' + x + '\033[0m'
 
-
-classifier = PointNetAuto(k = 3)
+num_points = dataset[0].shape[0]
+classifier = PointNetAuto(num_points=num_points, k=3)
 
 if opt.model != '':
     classifier.load_state_dict(torch.load(opt.model))
@@ -65,10 +67,14 @@ if torch.cuda.is_available():
 num_batch = len(dataset)/opt.batchSize
 
 loss_fn = torch.nn.MSELoss()
+classifier = classifier.train()
 
 for epoch in range(opt.nepoch):
+    pbar = tqdm(total=num_batch)
+    total_loss = 0
+    
     for i, data in enumerate(dataloader, 0):
-        points, _ = data
+        points = data
         points = Variable(points)
         points = points.transpose(2,1)
         
@@ -76,27 +82,29 @@ for epoch in range(opt.nepoch):
             points = points.cuda()
             
         optimizer.zero_grad()
-        classifier = classifier.train()
-        pred, _ = classifier(points)
         
+        pred, _ = classifier(points)
         loss = loss_fn(pred, points)
         loss.backward()
         optimizer.step()
-        print('[%d: %d/%d] train loss: %f' %(epoch, i, num_batch, loss.item()))
+        
+        total_loss += loss.item()
+        pbar.update(1)
 
-        if i % 10 == 0:
-            j, data = next(enumerate(testdataloader, 0))
-            points, _ = data
-            points = Variable(points)
-            points = points.transpose(2,1)
-            if torch.cuda.is_available():
-                points = points.cuda()
-                
-            classifier = classifier.eval()
-            pred, _ = classifier(points)
-            
-            loss = loss_fn(pred, points)
-            
-            print('[%d: %d/%d] %s loss: %f' %(epoch, i, num_batch, blue('test'), loss.item()))
+    pbar.close()
+    
+    j, data = next(enumerate(testdataloader, 0))
+    points = data
+    points = Variable(points)
+    points = points.transpose(2,1)
+    if torch.cuda.is_available():
+        points = points.cuda()
+        
+    classifier = classifier.eval()
+    pred, _ = classifier(points)
+    
+    loss = loss_fn(pred, points)    
+    print('[%d] %s loss: %f train loss: %f \n' 
+          % (epoch, blue('test'), loss.item(), total_loss / int(num_batch)))
 
-    torch.save(classifier.state_dict(), '%s/%s_model_%d.pth' % (opt.outf, opt.outf, epoch))
+    torch.save(classifier.state_dict(), '%s/model_%d.pth' % (opt.outf, epoch))
