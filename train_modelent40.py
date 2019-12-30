@@ -67,12 +67,13 @@ if torch.cuda.is_available():
 num_batch = len(dataset)/opt.batchSize
 
 loss_fn = torch.nn.MSELoss()
-classifier = classifier.train()
 
 for epoch in range(opt.nepoch):
-    pbar = tqdm(total=num_batch)
+    pbar = tqdm(total=int(num_batch))
     total_loss = 0
     
+    classifier.train()
+        
     for i, data in enumerate(dataloader, 0):
         points = data
         points = Variable(points)
@@ -93,18 +94,25 @@ for epoch in range(opt.nepoch):
 
     pbar.close()
     
-    j, data = next(enumerate(testdataloader, 0))
-    points = data
-    points = Variable(points)
-    points = points.transpose(2,1)
-    if torch.cuda.is_available():
-        points = points.cuda()
-        
-    classifier = classifier.eval()
-    pred, _ = classifier(points)
+    test_loss = 0
+    classifier.eval()
     
-    loss = loss_fn(pred, points)    
+    with torch.no_grad():
+        for data in testdataloader:
+            points = data
+            points = Variable(points)
+            points = points.transpose(2,1)
+            if torch.cuda.is_available():
+                points = points.cuda()
+                
+            classifier = classifier.eval()
+            pred, _ = classifier(points)        
+    
+            loss = loss_fn(pred, points)    
+            
+            test_loss += loss.item()
+            
     print('[%d] %s loss: %f train loss: %f \n' 
-          % (epoch, blue('test'), loss.item(), total_loss / int(num_batch)))
+          % (epoch, blue('test'), test_loss, total_loss / int(num_batch)))
 
     torch.save(classifier.state_dict(), '%s/model_%d.pth' % (opt.outf, epoch))
