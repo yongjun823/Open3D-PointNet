@@ -40,6 +40,11 @@ test_dataset = ModelNetDataset('./data', split='test', jitter=opt.jitter, sample
 testdataloader = torch.utils.data.DataLoader(test_dataset, batch_size=opt.batchSize,
                                           shuffle=False, num_workers=int(opt.workers))
 
+origin_dataset = ModelNetDataset('./data', split='test', jitter=False, sample=False)
+origindataloader = torch.utils.data.DataLoader(origin_dataset, batch_size=opt.batchSize,
+                                          shuffle=False, num_workers=int(opt.workers))
+
+
 num_batch = len(test_dataset) // opt.batchSize
 
 blue = lambda x:'\033[94m' + x + '\033[0m'
@@ -55,23 +60,27 @@ if torch.cuda.is_available():
 
 chamfer_dist = ChamferDistance()
 
-test_loss = 0
+loss_arr = []
 classifier.eval()
 
 with torch.no_grad():
-    for data in testdataloader:
-        points = data
-        points = Variable(points)
+    for test_data, origin_data in zip(testdataloader, origindataloader):
+        points = test_data
         points = points.transpose(2,1)
+        origin_points = origin_data.transpose(2,1)
+        
         if torch.cuda.is_available():
             points = points.cuda()
+            origin_points = origin_points.cuda()
             
         classifier = classifier.eval()
-        pred, _ = classifier(points)        
+        pred, _ = classifier(points)
 
-        dist1, dist2 = chamfer_dist(points, pred)
-        loss = (torch.mean(dist1)) + (torch.mean(dist2))
+        dist1, dist2 = chamfer_dist(origin_points, pred)
         
-        test_loss += loss.item()
+        loss = (torch.sum(dist1)) + (torch.sum(dist2))
+        
+        loss_arr.append(loss.item())
 
-print('%s loss: %f' % (blue('test'), test_loss / num_batch))
+print('%s loss: %f' % (blue('test'), np.mean(loss_arr)))
+print('%s var : %f' % (blue('test'), np.var(loss_arr)))
